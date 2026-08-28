@@ -29,6 +29,13 @@ except Exception:
 from typing import TypedDict, Optional
 from langgraph.graph import StateGraph, END
 
+try:
+    from langchain_ollama import ChatOllama
+    from langchain_core.messages import HumanMessage
+    OLLAMA_AVAILABLE = True
+except ImportError:
+    OLLAMA_AVAILABLE = False
+
 
 ITEM_WEIGHT_KG = {
     "vada_pav": 0.30,
@@ -151,10 +158,20 @@ def calculate_shipping(state: OrderState) -> dict:
 
 
 def confirm_order(state: OrderState) -> dict:
-    message = (
-        f"Your order of {state['quantity']} x {state['item']} is confirmed! "
-        f"Shipping will cost Rs.{state['shipping_cost']}."
+    prompt = (
+        f"Write a SHORT order-confirmation message for a Maharashtrian food "
+        f"delivery. Write ONLY in Latin/English letters (a-z) - do NOT use "
+        f"Devanagari/Hindi script at all. Start with 'Namaskar!'. You MUST state "
+        f"the exact shipping amount Rs.{state['shipping_cost']} (do not compute "
+        f"or change it). Mention ordering {state['quantity']} x {state['item']} "
+        f"and delivery to {state['locality']}. End with 'Dhanyavaad!'. Keep it "
+        f"ONE short sentence."
     )
+    message = _generate_message(prompt, fallback=(
+        f"Namaskar! Your order of {state['quantity']} x {state['item']} "
+        f"to {state['locality']} is confirmed. Shipping Rs.{state['shipping_cost']}. "
+        f"Dhanyavaad!"
+    ))
     log = f"[confirm_order] status=CONFIRMED message='{message}'"
     print(log)
     return {
@@ -165,10 +182,19 @@ def confirm_order(state: OrderState) -> dict:
 
 
 def decline_order(state: OrderState) -> dict:
-    message = (
-        f"Sorry, we can't fulfill {state['quantity']} x {state['item']} right "
-        f"now - only {state['available_stock']} in stock."
+    prompt = (
+        f"Write a SHORT polite order-decline message for a Maharashtrian food "
+        f"delivery service. Write ONLY in Latin/English letters (a-z) - do NOT "
+        f"use Devanagari/Hindi script at all. Start with 'Namaskar, sorry'. "
+        f"Mention we only have {state['available_stock']} x {state['item']} in "
+        f"stock so we can't fulfill {state['quantity']}. Suggest ordering "
+        f"something else. End with 'Dhanyavaad!'. Keep it ONE short sentence."
     )
+    message = _generate_message(prompt, fallback=(
+        f"Namaskar, sorry - we only have {state['available_stock']} x "
+        f"{state['item']} in stock, so we can't fulfill "
+        f"{state['quantity']}. Kyā tumhi āṇakhī kāhīy magal? Dhanyavaad!"
+    ))
     log = f"[decline_order] status=DECLINED message='{message}'"
     print(log)
     return {
@@ -176,6 +202,24 @@ def decline_order(state: OrderState) -> dict:
         "final_message": message,
         "trace": state["trace"] + [log],
     }
+
+
+USED_FALLBACK = False
+
+
+def _generate_message(prompt: str, fallback: str) -> str:
+    """Calls local Ollama (qwen2.5:3b) if available, else uses a canned string."""
+    global USED_FALLBACK
+    if not OLLAMA_AVAILABLE:
+        USED_FALLBACK = True
+        return fallback
+    try:
+        llm = ChatOllama(model="qwen2.5:3b", temperature=0.3)
+        response = llm.invoke([HumanMessage(content=prompt)])
+        return response.content.strip()
+    except Exception:
+        USED_FALLBACK = True
+        return fallback
 
 
 def build_graph():
