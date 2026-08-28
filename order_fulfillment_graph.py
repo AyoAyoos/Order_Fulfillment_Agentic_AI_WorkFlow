@@ -30,6 +30,16 @@ from typing import TypedDict, Optional
 from langgraph.graph import StateGraph, END
 
 
+INVENTORY_DB = {
+    "vada_pav": 25,
+    "misal_pav": 30,
+    "modak": 12,
+    "puran_poli": 18,
+    "kolhapuri_chicken": 5,
+    "kokum_sherbet": 0,
+}
+
+
 class OrderState(TypedDict):
     item: str
     quantity: int
@@ -44,7 +54,25 @@ class OrderState(TypedDict):
 
 
 def check_inventory(state: OrderState) -> dict:
-    return {}
+    """Node 1: look up stock for the dish and decide if we have enough.
+
+    THE CONDITION (the heart of the whole project):
+        inventory_ok = (stock >= quantity)
+    """
+    item = state["item"]
+    quantity = state["quantity"]
+    stock = INVENTORY_DB.get(item, 0)
+    ok = stock >= quantity
+
+    log = (f"[check_inventory] dish='{item}' requested={quantity} "
+           f"in_stock={stock} -> {'OK' if ok else 'INSUFFICIENT'}")
+    print(log)
+
+    return {
+        "inventory_ok": ok,
+        "available_stock": stock,
+        "trace": state["trace"] + [log],
+    }
 
 
 def route_after_inventory(state: OrderState) -> str:
