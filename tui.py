@@ -10,12 +10,15 @@ It never touches the graph logic directly — it receives streamed updates from
 `main.py` (which calls `app.stream(...)`) and renders them.
 """
 
+import time
+
 import pyfiglet
 from rich.console import Console
 from rich.panel import Panel
 from rich.table import Table
 from rich.text import Text
 from rich.prompt import Prompt, IntPrompt
+from rich.live import Live
 from rich import box
 
 from order_graph import (
@@ -134,3 +137,77 @@ def get_locality():
 def ask_again():
     return Prompt.ask("\n[bold cyan]Order something else?[/]", choices=["y", "n"],
                       default="n").strip().lower() == "y"
+
+# ---------------------------------------------------------------------------
+# Live execution trace (driven by real graph streaming)
+# ---------------------------------------------------------------------------
+NODE_ORDER = ["check_inventory", "calculate_shipping", "confirm_order", "decline_order"]
+
+
+def _render_trace(completed, captions):
+    """Build the live-updating table of node statuses."""
+    table = Table(title="Execution Trace", box=box.HEAVY, show_lines=True)
+    table.add_column("Node", style="bold", min_width=20)
+    table.add_column("Status", width=14)
+    table.add_column("Detail")
+
+    pending = [n for n in NODE_ORDER if n not in completed]
+
+    for node in NODE_ORDER:
+        if node in completed:
+            cap = captions.get(node, "")
+            table.add_row(node, "[green bold]\u2713 done[/]", cap, style="green")
+        else:
+            table.add_row(node, "[dim]\u2026 pending[/]", "[dim]-[/]", style="dim")
+
+    if pending:
+        table.add_row("\u25cf route", "[dim]\u2026 waiting[/]", "[dim](conditional edge)",
+                      style="dim")
+
+    return Panel(table, title="[bold]Graph Execution[/bold]",
+                 border_style="blue", box=box.ROUNDED)
+
+
+def stream_trace(app, initial_state):
+    """Run the graph, feeding the Live table from real streamed updates.
+
+    Uses stream_mode="values" so each yielded state is the FULL accumulated
+    state; we read its last trace event to know which node just finished.
+    Returns the final accumulated state dict.
+    """
+    completed = []
+    captions = {}
+
+    def caption_for(event):
+        node = event["node"]
+        if node == "check_inventory":
+            per = event.get("per_item", [])
+            if event.get("status") == "ok":
+                return f"[green]{len(per)} item(s): ALL in stock[/]"
+            bad = [p["dish"] for p in per if not p["ok"]]
+            return f"[red]short: {', '.join(bad)}[/]"
+        if node == "calculate_shipping":
+            return (f"[green]Rs.{event['shipping_cost']:.0f} -> "
+                    f"{event['locality']} ({event['distance_km']} km)[/]")
+        if node == "confirm_order":
+            return "[green]order CONFIRMED[/]"
+        if node == "decline_order":
+            return f"[red]DECLINED ({event['failed_item']})[/]"
+        return ""
+
+    final_state = None
+    with Live(_render_trace(completed, captions), console=console,
+              refresh_per_second=6) as live:
+        for step in app.stream(initial_state, stream_mode="values"):
+            final_state = step
+            events = step.get("trace", [])
+            if events:
+                last = events[-1]
+                node_name = last["node"]
+                captions[node_name] = caption_for(last)
+                if node_name not in completed:
+                    completed.append(node_name)
+                live.update(_render_trace(completed, captions))
+                time.sleep(0.15)
+
+    return final_state
