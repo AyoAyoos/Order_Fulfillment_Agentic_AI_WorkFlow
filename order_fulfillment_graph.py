@@ -76,7 +76,28 @@ def check_inventory(state: OrderState) -> dict:
 
 
 def route_after_inventory(state: OrderState) -> str:
-    return "insufficient"
+    """
+    THE CONDITIONAL EDGE (the #1 jury question).
+
+    LangGraph calls this AUTOMATICALLY the moment check_inventory finishes.
+    It is the only place that decides where the graph goes next.
+
+        check_inventory --> is there enough stock?
+                                |
+                        +-------v-------+
+                        |   inventory_ok  | -> "sufficient" (calculate_shipping)
+                        |    == True      |
+                        +-----------------+
+                        |   inventory_ok  | -> "insufficient" (decline_order)
+                        |    == False     |
+                        +-----------------+
+    """
+    ok = state["inventory_ok"]
+
+    if ok:
+        return "sufficient"
+    else:
+        return "insufficient"
 
 
 def calculate_shipping(state: OrderState) -> dict:
@@ -84,11 +105,31 @@ def calculate_shipping(state: OrderState) -> dict:
 
 
 def confirm_order(state: OrderState) -> dict:
-    return {}
+    message = (
+        f"Your order of {state['quantity']} x {state['item']} is confirmed! "
+        f"Shipping will cost Rs.{state['shipping_cost']}."
+    )
+    log = f"[confirm_order] status=CONFIRMED message='{message}'"
+    print(log)
+    return {
+        "order_status": "confirmed",
+        "final_message": message,
+        "trace": state["trace"] + [log],
+    }
 
 
 def decline_order(state: OrderState) -> dict:
-    return {}
+    message = (
+        f"Sorry, we can't fulfill {state['quantity']} x {state['item']} right "
+        f"now - only {state['available_stock']} in stock."
+    )
+    log = f"[decline_order] status=DECLINED message='{message}'"
+    print(log)
+    return {
+        "order_status": "declined",
+        "final_message": message,
+        "trace": state["trace"] + [log],
+    }
 
 
 def build_graph():
