@@ -266,6 +266,17 @@ def run_case(app, label, item, quantity, locality):
 
     result = app.invoke(initial_state)
 
+    if result["order_status"] == "confirmed":
+        price = MENU_PRICE.get(item, 0)
+        subtotal = price * quantity
+        total = round(subtotal + (result.get("shipping_cost") or 0.0), 2)
+        print("-" * 70)
+        print(f"ITEM    : {quantity} x {item} @ Rs.{price} = Rs.{subtotal}")
+        print(f"SHIPPING: Rs.{result.get('shipping_cost')}  "
+              f"(to {locality}, {DELIVERY_KM.get(locality, 0.0)} km)")
+        print(f"TOTAL   : Rs.{total}")
+        print("=" * 70)
+
     print("-" * 70)
     print(f"FINAL STATUS : {result['order_status'].upper()}")
     print(f"FINAL MESSAGE: {result['final_message']}")
