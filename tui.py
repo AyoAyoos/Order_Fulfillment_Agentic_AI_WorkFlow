@@ -15,6 +15,7 @@ from rich.console import Console
 from rich.panel import Panel
 from rich.table import Table
 from rich.text import Text
+from rich.prompt import Prompt, IntPrompt
 from rich import box
 
 from order_graph import (
@@ -77,3 +78,59 @@ def show_delivery_area():
 
     console.print(Panel(area, title=f"from {BASE_LOCATION}",
                         border_style="cyan", box=box.ROUNDED))
+
+# ---------------------------------------------------------------------------
+# Input prompts (Rich)
+# ---------------------------------------------------------------------------
+def get_dishes():
+    """Comma-separated dish selection with validation (multi-item)."""
+    console.print(Panel(
+        "[bold cyan]You can order several dishes at once.[/]\n"
+        "Type names separated by commas, e.g.  [green]vada_pav, misal_pav, modak[/]",
+        title="New Order",
+        border_style="blue",
+    ))
+    choices = {d.lower(): d for d in MENU_PRICE}
+    while True:
+        raw = Prompt.ask("[bold cyan]Choose dishes[/]").strip().lower()
+        names = [n.strip() for n in raw.split(",") if n.strip()]
+        if not names:
+            console.print("[red]Please enter at least one dish.[/]")
+            continue
+        if any(n not in choices for n in names):
+            unknown = [n for n in names if n not in choices]
+            console.print(f"[red]Unknown dish(es): {', '.join(unknown)}.[/] "
+                          f"Choose from: {', '.join(MENU_PRICE)}")
+            continue
+        names = list(dict.fromkeys(names))  # drop duplicates, keep order
+        break
+
+    items = []
+    for n in names:
+        qty = IntPrompt.ask(
+            f"[bold cyan]How many servings of {choices[n]}?[/]",
+            default=1,
+        )
+        while qty < 1:
+            qty = IntPrompt.ask(
+                f"[red]Must be at least 1.[/] "
+                f"[bold cyan]How many servings of {choices[n]}?[/]",
+                default=1,
+            )
+        items.append({"dish": choices[n], "quantity": int(qty)})
+    return items
+
+
+def get_locality():
+    lookup = {k.lower(): k for k in DELIVERY_KM}
+    while True:
+        raw = Prompt.ask("[bold cyan]Deliver to[/]").strip().lower()
+        if raw in lookup:
+            return lookup[raw]
+        console.print(f"[red]'{raw}' is not a locality we deliver to.[/] "
+                      f"Choose one from the list above.")
+
+
+def ask_again():
+    return Prompt.ask("\n[bold cyan]Order something else?[/]", choices=["y", "n"],
+                      default="n").strip().lower() == "y"
