@@ -412,6 +412,45 @@ def take_order(app):
     return result
 
 
+def compute_bill(items, shipping_cost):
+    """Pure helper: returns (billing_rows, subtotal, total) for an order."""
+    rows = []
+    subtotal = 0
+    for it in items:
+        price = MENU_PRICE[it["dish"]]
+        sub = price * it["quantity"]
+        subtotal += sub
+        rows.append((it["dish"], it["quantity"], price, sub))
+    total = round(subtotal + shipping_cost, 2)
+    return rows, subtotal, total
+
+
+def print_billing(result):
+    print("\n" + "=" * 60)
+    print("BILLING / SUMMARY")
+    print("=" * 60)
+    if result["order_status"] == "confirmed":
+        rows, subtotal, total = compute_bill(
+            result["items"], result["shipping_cost"]
+        )
+        print(f"{'DISH':<18}{'QTY':>5}{'PRICE':>8}{'SUB':>10}")
+        print("-" * 60)
+        for dish, qty, price, sub in rows:
+            print(f"{dish:<18}{qty:>5}Rs.{price:<5}Rs.{sub:>5}")
+        print("-" * 60)
+        print(f"{'Subtotal':<31}{'Rs.' + str(subtotal):>15}")
+        print(f"Shipping   : Rs.{result['shipping_cost']:.1f}  "
+              f"(to {result['locality']}, "
+              f"{DELIVERY_KM.get(result['locality'], 0.0)} km)")
+        print("-" * 60)
+        print(f"{'TOTAL':<31}{'Rs.' + str(total):>15}")
+    else:
+        print(f"ORDER DECLINED - {result['failed_item']} has only "
+              f"{result['available_stock']} in stock.")
+        print("No billing was produced and NO shipping was charged.")
+    print("=" * 60)
+
+
 if __name__ == "__main__":
     app = build_graph()
 
@@ -419,32 +458,8 @@ if __name__ == "__main__":
     while keep_going:
         result = take_order(app)
 
-        print("\n" + "=" * 60)
-        print("BILLING / SUMMARY")
-        print("=" * 60)
-        if result["order_status"] == "confirmed":
-            print(f"{'DISH':<18}{'QTY':>5}{'PRICE':>8}{'SUB':>10}")
-            print("-" * 60)
-            subtotal = 0
-            for it in result["items"]:
-                price = MENU_PRICE[it["dish"]]
-                sub = price * it["quantity"]
-                subtotal += sub
-                print(f"{it['dish']:<18}{it['quantity']:>5}Rs.{price:<5}"
-                      f"Rs.{sub:>5}")
-            print("-" * 60)
-            print(f"{'Subtotal':<31}{'Rs.' + str(subtotal):>15}")
-            print(f"Shipping   : Rs.{result['shipping_cost']:.1f}  "
-                  f"(to {result['locality']}, "
-                  f"{DELIVERY_KM.get(result['locality'], 0.0)} km)")
-            total = round(subtotal + result["shipping_cost"], 2)
-            print("-" * 60)
-            print(f"{'TOTAL':<31}{'Rs.' + str(total):>15}")
-        else:
-            print(f"ORDER DECLINED - {result['failed_item']} has only "
-                  f"{result['available_stock']} in stock.")
-            print("No billing was produced and NO shipping was charged.")
-        print("=" * 60)
+        print_billing(result)
+
         print(f"FINAL STATUS : {result['order_status'].upper()}")
         print(f"FINAL MESSAGE: {result['final_message']}")
         print("NODES RUN    : " + " -> ".join(
