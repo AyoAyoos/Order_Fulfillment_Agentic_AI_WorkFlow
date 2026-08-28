@@ -11,18 +11,18 @@ except Exception:
     pass
 
 from order_graph import build_graph
-from tui import show_banner, run_order_session, render_footer
+from tui import render_banner, run_order_session, render_footer
 
 
 def main():
     app = build_graph()
-    show_banner()
 
     keep_going = True
+    last_state = {}
     while keep_going:
-        keep_going = run_order_session(app)
+        keep_going, last_state = run_order_session(app)
 
-    render_footer()
+    render_footer(last_state)
 
 
 if __name__ == "__main__":
