@@ -20,6 +20,43 @@ Workflow:
 from typing import TypedDict, Optional
 from langgraph.graph import StateGraph, END
 
+# --- Shared event-schema contract ------------------------------------------
+# Each node records a structured trace event. The terminal UI (tui.py) renders
+# these shapes, so every node must return exactly the keys declared below.
+# Defining them once here keeps the graph <-> UI contract explicit and typed.
+
+
+class CheckInventoryEvent(TypedDict):
+    node: str
+    status: str                       # "ok" | "insufficient"
+    per_item: list                    # [{dish, requested, stock, ok}, ...]
+
+
+class ShippingEvent(TypedDict):
+    node: str
+    status: str                       # "ok"
+    locality: str
+    distance_km: float
+    shipping_cost: float
+
+
+class ConfirmEvent(TypedDict):
+    node: str
+    status: str                       # "confirmed"
+    message: str
+    shipping_cost: float
+
+
+class DeclineEvent(TypedDict):
+    node: str
+    status: str                       # "declined"
+    message: str
+    failed_item: str
+    available_stock: int
+
+
+TraceEvent = CheckInventoryEvent | ShippingEvent | ConfirmEvent | DeclineEvent
+
 try:
     from langchain_ollama import ChatOllama
     from langchain_core.messages import HumanMessage
@@ -86,6 +123,7 @@ class OrderState(TypedDict):
     shipping_cost: Optional[float]
     order_status: Optional[str]
     final_message: Optional[str]
+    fallback_used: Optional[bool]    # True if the LLM message used fallback text
     trace: list                      # structured events for the UI to render
 
 
@@ -192,7 +230,7 @@ def confirm_order(state: OrderState) -> dict:
         f"and delivery to {state['locality']}. End with 'Dhanyavaad!'. Keep it "
         f"ONE short sentence."
     )
-    message = _generate_message(prompt, fallback=(
+    message, used_fallback = _generate_message(prompt, fallback=(
         f"Namaskar! Your order of {_describe_items(state)} "
         f"to {state['locality']} is confirmed. Shipping Rs.{state['shipping_cost']}. "
         f"Dhanyavaad!"
@@ -206,6 +244,7 @@ def confirm_order(state: OrderState) -> dict:
     return {
         "order_status": "confirmed",
         "final_message": message,
+        "fallback_used": used_fallback,
         "trace": state["trace"] + [trace_event],
     }
 
@@ -220,7 +259,7 @@ def decline_order(state: OrderState) -> dict:
         f"of {_describe_items(state)}. Suggest ordering "
         f"something else. End with 'Dhanyavaad!'. Keep it ONE short sentence."
     )
-    message = _generate_message(prompt, fallback=(
+    message, used_fallback = _generate_message(prompt, fallback=(
         f"Namaskar, sorry - we only have {state['available_stock']} x "
         f"{state['failed_item']} in stock, so we can't fulfill "
         f"{_describe_items(state)}. Kyā tumhi āṇakhī kāhīy magal? Dhanyavaad!"
@@ -235,6 +274,7 @@ def decline_order(state: OrderState) -> dict:
     return {
         "order_status": "declined",
         "final_message": message,
+        "fallback_used": used_fallback,
         "trace": state["trace"] + [trace_event],
     }
 
@@ -242,22 +282,29 @@ def decline_order(state: OrderState) -> dict:
 # ---------------------------------------------------------------------------
 # LLM message generation (with fallback)
 # ---------------------------------------------------------------------------
+# Kept as a module-level flag for backward-compatibility with demo.py; the
+# primary/cleaner path passes `fallback_used` through the returned state.
 USED_FALLBACK = False
 
 
-def _generate_message(prompt: str, fallback: str) -> str:
-    """Calls local Ollama (qwen2.5:3b) if available, else uses a canned string."""
+def _generate_message(prompt: str, fallback: str) -> tuple:
+    """Calls local Ollama (qwen2.5:3b) if available, else uses a canned string.
+
+    Returns (message, used_fallback). The used_fallback flag is carried back
+    through the returned state (not a hidden module global) so the UI can
+    render a graceful notice without reaching into this module's internals.
+    """
     global USED_FALLBACK
     if not OLLAMA_AVAILABLE:
         USED_FALLBACK = True
-        return fallback
+        return fallback, True
     try:
         llm = ChatOllama(model="qwen2.5:3b", temperature=0.3)
         response = llm.invoke([HumanMessage(content=prompt)])
-        return response.content.strip()
+        return response.content.strip(), False
     except Exception:
         USED_FALLBACK = True
-        return fallback
+        return fallback, True
 
 
 # ---------------------------------------------------------------------------
