@@ -1,0 +1,103 @@
+============================================================
+     SHRI SWAMI SAMARTH MAHARASHTRIAN KHANAVAL
+             (based at Loni Kalbhor)
+============================================================
+DISH                 PRICE   STOCK
+------------------------------------------------------------
+vada_pav          Rs.25          25
+misal_pav         Rs.70          30
+modak             Rs.60          12
+puran_poli        Rs.90          18
+kolhapuri_chicken Rs.220          5
+kokum_sherbet     Rs.40           0
+
+DELIVERY AREA (from Loni Kalbhor):
+    1. Loni Station       0.7 km
+    2. Kadam Wasti        1.5 km
+    3. Loni Kalbhor       4.1 km
+    4. Manjari            6.4 km
+    5. Uruli Kanchan      11.7 km
+    6. Hadapsar           11.8 km
+    7. Amanora Mall       12.1 km
+    8. Magarpatta City    12.8 km
+    9. Kharadi            16.2 km
+   10. Wagholi            16.6 km
+
+You can order several dishes. Type dish names separated by commas, e.g.:
+  vada_pav, misal_pav, modak
+Choose dishes (comma-separated):   How many servings of vada_pav?   How many servings of misal_pav?   How many servings of modak? Deliver to (locality): 
+============================================================
+RUNNING GRAPH...
+============================================================
+[check_inventory]  2x vada_pav(stock=25) -> OK
+[check_inventory]  1x misal_pav(stock=30) -> OK
+[check_inventory]  4x modak(stock=12) -> OK
+[calculate_shipping] 3 item(s) to Loni Station (0.7km) -> shipping=Rs.30.0
+[confirm_order] status=CONFIRMED message='Namaskar! Pls order 2x vada_pav, 1x misal_pav, 4x modak for Loni Station at Rs.30.0 & Dhanyavaad!'
+
+============================================================
+BILLING / SUMMARY
+============================================================
+DISH                QTY   PRICE       SUB
+------------------------------------------------------------
+vada_pav              2Rs.25   Rs.   50
+misal_pav             1Rs.70   Rs.   70
+modak                 4Rs.60   Rs.  240
+------------------------------------------------------------
+Subtotal                                Rs.360
+Shipping   : Rs.30.0  (to Loni Station, 0.7 km)
+------------------------------------------------------------
+TOTAL                                 Rs.390.0
+============================================================
+FINAL STATUS : CONFIRMED
+FINAL MESSAGE: Namaskar! Pls order 2x vada_pav, 1x misal_pav, 4x modak for Loni Station at Rs.30.0 & Dhanyavaad!
+NODES RUN    : [check_inventory] -> [calculate_shipping] -> [confirm_order]
+============================================================
+
+Order something else? (y/n): 
+Dhanyavaad! αñåαñ¬αñ▓αÑìαñ»αñ╛ αñ¡αÑçαñƒαÑÇαññ αñåαñ¿αñéαñª αñ¥αñ╛αñ▓αñ╛. Goodbye!
+
+================================================================================
+JURY Q1: WHY IS SHIPPING CALCULATED AFTER INVENTORY?
+================================================================================
+Because shipping is a meaningful step that should only run when the order can
+actually be fulfilled. If we computed shipping BEFORE checking stock, we would
+spend effort (and charge a customer) for a delivery that cannot happen.
+
+Look at the NODES RUN of the DECLINE path:
+    [check_inventory] -> [decline_order]
+
+calculate_shipping is NEVER reached. So when kokum_sherbet is out of stock,
+the graph declines the whole order BEFORE any shipping/billing happens — the
+billing section prints "No billing was produced and NO shipping was charged."
+
+If shipping came first, the graph would instead read:
+    [check_inventory] -> [calculate_shipping] -> [decline_order]
+which would leave a shipping_cost on a declined order — wrong.
+
+================================================================================
+JURY Q2: HOW IS decline_order TRIGGERED? (walk through the condition)
+================================================================================
+1) The graph ALWAYS starts at the check_inventory node (the entry point).
+2) check_inventory loops over EVERY dish in the order (items list) and tests
+   THE CONDITION for each one:
+
+        is_stock_enough = (stock_in_database >= quantity_requested)
+
+   For the DECLINE trace:
+     - 2x misal_pav:   stock=30 >= 2  -> True  (OK)
+     - 4x kokum_sherbet: stock=0  >= 4  -> False (INSUFFICIENT)
+   It records all_ok=False and remembers failed_item='kokum_sherbet'.
+
+3) When check_inventory finishes, LangGraph automatically calls the
+   conditional-edge function route_after_inventory(state). That function looks
+   at the single bool we saved:
+
+        if inventory_ok is True:  return "sufficient"   -> calculate_shipping
+        else:                     return "insufficient" -> decline_order
+
+4) Because ONE dish (kokum_sherbet) was short, inventory_ok=False, so the edge
+   returns "insufficient" and LangGraph routes to decline_order.
+   This is ALL-OR-NOTHING: the 2x misal_pav was fine, but the whole order is
+   still declined because we cannot accept partial orders — one short item
+   kills the entire order.
