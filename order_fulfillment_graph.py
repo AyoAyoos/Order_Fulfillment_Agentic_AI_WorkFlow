@@ -56,6 +56,15 @@ INVENTORY_DB = {
 
 BASE_LOCATION = "Loni Kalbhor"
 
+MENU_PRICE = {
+    "vada_pav": 25,
+    "misal_pav": 70,
+    "modak": 60,
+    "puran_poli": 90,
+    "kolhapuri_chicken": 220,
+    "kokum_sherbet": 40,
+}
+
 DELIVERY_KM = {
     "Loni Station":      0.7,
     "Kadam Wasti":       1.5,
