@@ -246,3 +246,46 @@ def build_graph():
     graph.add_edge("decline_order", END)
 
     return graph.compile()
+
+
+def run_case(app, label, item, quantity, locality):
+    print("\n" + "=" * 70)
+    print(f"TRACE: {label}")
+    print("=" * 70)
+
+    initial_state: OrderState = {
+        "item": item,
+        "quantity": quantity,
+        "locality": locality,
+        "inventory_ok": None,
+        "available_stock": None,
+        "shipping_cost": None,
+        "order_status": None,
+        "final_message": None,
+        "trace": [],
+    }
+
+    result = app.invoke(initial_state)
+
+    print("-" * 70)
+    print(f"FINAL STATUS : {result['order_status'].upper()}")
+    print(f"FINAL MESSAGE: {result['final_message']}")
+    print("NODES RUN    : " + " -> ".join(
+        s.split("]")[0] + "]" for s in result["trace"]))
+    print("-" * 70)
+    return result
+
+
+if __name__ == "__main__":
+    app = build_graph()
+
+    run_case(app, "SUCCESS PATH (sufficient inventory)",
+             item="misal_pav", quantity=10, locality="Manjari")
+
+    run_case(app, "DECLINE PATH (insufficient inventory)",
+             item="kokum_sherbet", quantity=3, locality="Kharadi")
+
+    print("\nDone. Both traces printed above.")
+    if USED_FALLBACK:
+        print("(Note: could not reach a running Ollama server, so fallback canned messages were used.")
+        print(" Run 'ollama serve' + 'ollama pull qwen2.5:3b' first to see LLM-generated messages.)")
