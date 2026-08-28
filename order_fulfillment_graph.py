@@ -30,6 +30,16 @@ from typing import TypedDict, Optional
 from langgraph.graph import StateGraph, END
 
 
+ITEM_WEIGHT_KG = {
+    "vada_pav": 0.30,
+    "misal_pav": 0.50,
+    "modak": 0.20,
+    "puran_poli": 0.45,
+    "kolhapuri_chicken": 1.20,
+    "kokum_sherbet": 1.00,
+}
+
+
 INVENTORY_DB = {
     "vada_pav": 25,
     "misal_pav": 30,
@@ -44,6 +54,7 @@ class OrderState(TypedDict):
     item: str
     quantity: int
     locality: str                    # customer's delivery location
+    distance_km: Optional[float]
 
     inventory_ok: Optional[bool]
     available_stock: Optional[int]
@@ -101,7 +112,27 @@ def route_after_inventory(state: OrderState) -> str:
 
 
 def calculate_shipping(state: OrderState) -> dict:
-    return {}
+    """
+    Node 2: only reached when inventory is sufficient.
+    Cost = base fee + ($ per kg * total weight) + ($ per km * distance).
+    """
+    item_weight = ITEM_WEIGHT_KG.get(state["item"], 1.0)
+    total_weight = item_weight * state["quantity"]
+    distance = state.get("distance_km", 0.0)
+
+    base_fee = 2.0
+    weight_rate = 0.8
+    distance_rate = 0.05
+
+    cost = round(base_fee + (weight_rate * total_weight) + (distance_rate * distance), 2)
+
+    log = (f"[calculate_shipping] '{state['item']}' x{state['quantity']} "
+           f"weight={total_weight}kg distance={distance}km -> shipping=${cost}")
+    print(log)
+    return {
+        "shipping_cost": cost,
+        "trace": state["trace"] + [log],
+    }
 
 
 def confirm_order(state: OrderState) -> dict:
