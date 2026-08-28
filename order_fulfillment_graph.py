@@ -286,16 +286,104 @@ def run_case(app, label, item, quantity, locality):
     return result
 
 
+# ---------------------------------------------------------------------------
+# Interactive helpers
+# ---------------------------------------------------------------------------
+def show_menu():
+    print("=" * 60)
+    print("     SHRI SWAMI SAMARTH MAHARASHTRIAN KHANAVAL")
+    print(f"             (based at {BASE_LOCATION})")
+    print("=" * 60)
+    print(f"{'DISH':<18}{'PRICE':>8}{'STOCK':>8}")
+    print("-" * 60)
+    for dish, price in MENU_PRICE.items():
+        print(f"{dish:<18}Rs.{price:<6}{INVENTORY_DB[dish]:>8}")
+
+
+def show_delivery_area():
+    print("\nDELIVERY AREA (from {0}):".format(BASE_LOCATION))
+    for i, (locality, km) in enumerate(DELIVERY_KM.items(), 1):
+        print(f"   {i:>2}. {locality:<18} {km} km")
+
+
+def get_validated_input(prompt, choices, label):
+    """Keep asking until the user types a valid choice from the list."""
+    while True:
+        value = input(prompt).strip().lower()
+        if value in choices:
+            return value
+        print(f"  Sorry, '{value}' is not a valid {label}. "
+              f"Choose from: {', '.join(choices)}")
+
+
+def get_positive_int(prompt):
+    while True:
+        raw = input(prompt).strip()
+        try:
+            n = int(raw)
+            if n > 0:
+                return n
+            print("  Please enter a whole number greater than 0.")
+        except ValueError:
+            print("  That isn't a number. Please try again.")
+
+
+def take_order(app):
+    """One full interactive ordering session."""
+    show_menu()
+    show_delivery_area()
+
+    dish = get_validated_input(
+        "\nWhat dish would you like? ", set(MENU_PRICE), "dish"
+    )
+    quantity = get_positive_int(f"  How many servings of {dish}? ")
+    locality = get_validated_input(
+        "Deliver to (locality): ", set(map(str.lower, DELIVERY_KM)), "locality"
+    )
+    locality = next(k for k in DELIVERY_KM if k.lower() == locality)
+
+    print("\n" + "=" * 60)
+    print("RUNNING GRAPH...")
+    print("=" * 60)
+
+    initial_state: OrderState = {
+        "item": dish,
+        "quantity": quantity,
+        "locality": locality,
+        "inventory_ok": None,
+        "available_stock": None,
+        "shipping_cost": None,
+        "order_status": None,
+        "final_message": None,
+        "trace": [],
+    }
+
+    result = app.invoke(initial_state)
+
+    return result
+
+
 if __name__ == "__main__":
     app = build_graph()
 
-    run_case(app, "SUCCESS PATH (sufficient inventory)",
-             item="misal_pav", quantity=10, locality="Manjari")
+    keep_going = True
+    while keep_going:
+        result = take_order(app)
 
-    run_case(app, "DECLINE PATH (insufficient inventory)",
-             item="kokum_sherbet", quantity=3, locality="Kharadi")
+        print("\n" + "=" * 60)
+        print("BILLING / SUMMARY")
+        print("=" * 60)
+        print(f"FINAL STATUS : {result['order_status'].upper()}")
+        print(f"FINAL MESSAGE: {result['final_message']}")
+        print("NODES RUN    : " + " -> ".join(
+            s.split("]")[0] + "]" for s in result["trace"]))
+        print("=" * 60)
 
-    print("\nDone. Both traces printed above.")
+        again = input("\nOrder something else? (y/n): ").strip().lower()
+        if again != "y":
+            keep_going = False
+            print("\nDhanyavaad! आपल्या भेटीत आनंद झाला. Goodbye!")
+
     if USED_FALLBACK:
-        print("(Note: could not reach a running Ollama server, so fallback canned messages were used.")
+        print("\n(Note: could not reach a running Ollama server, so fallback canned messages were used.")
         print(" Run 'ollama serve' + 'ollama pull qwen2.5:3b' first to see LLM-generated messages.)")
