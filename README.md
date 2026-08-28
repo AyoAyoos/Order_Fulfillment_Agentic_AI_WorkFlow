@@ -96,10 +96,11 @@ If Ollama isn't running, the script automatically uses pre-written fallback mess
 ### 3. Run
 
 ```bash
-python main.py
+python main.py            # interactive Rich terminal UI
+python demo.py            # non-interactive: run both paths, plain-text traces
 ```
 
-The script shows the full menu and delivery area, then asks you interactively:
+The interactive UI shows the full menu and delivery area, then asks you interactively:
 
 ```
 Choose dishes (comma-separated):  vada_pav, misal_pav
