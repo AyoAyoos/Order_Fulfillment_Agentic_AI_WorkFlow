@@ -49,6 +49,21 @@ INVENTORY_DB = {
     "kokum_sherbet": 0,
 }
 
+BASE_LOCATION = "Loni Kalbhor"
+
+DELIVERY_KM = {
+    "Loni Station":      0.7,
+    "Kadam Wasti":       1.5,
+    "Loni Kalbhor":      4.1,
+    "Manjari":           6.4,
+    "Uruli Kanchan":    11.7,
+    "Hadapsar":         11.8,
+    "Amanora Mall":     12.1,
+    "Magarpatta City":  12.8,
+    "Kharadi":          16.2,
+    "Wagholi":          16.6,
+}
+
 
 class OrderState(TypedDict):
     item: str
