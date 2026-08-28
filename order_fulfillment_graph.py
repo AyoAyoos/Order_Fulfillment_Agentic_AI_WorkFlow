@@ -37,14 +37,12 @@ except ImportError:
     OLLAMA_AVAILABLE = False
 
 
-ITEM_WEIGHT_KG = {
-    "vada_pav": 0.30,
-    "misal_pav": 0.50,
-    "modak": 0.20,
-    "puran_poli": 0.45,
-    "kolhapuri_chicken": 1.20,
-    "kokum_sherbet": 1.00,
-}
+def shipping_fee_for(distance_km: float) -> float:
+    if distance_km <= 5.0:
+        return 30.0
+    if distance_km <= 12.0:
+        return 35.0
+    return 40.0
 
 
 INVENTORY_DB = {
@@ -135,21 +133,13 @@ def route_after_inventory(state: OrderState) -> str:
 def calculate_shipping(state: OrderState) -> dict:
     """
     Node 2: only reached when inventory is sufficient.
-    Cost = base fee + ($ per kg * total weight) + ($ per km * distance).
+    A single flat delivery fee in rupees (Rs.30-40) based on distance.
     """
-    item_weight = ITEM_WEIGHT_KG.get(state["item"], 1.0)
-    total_weight = item_weight * state["quantity"]
     distance = DELIVERY_KM.get(state["locality"], 0.0)
-
-    base_fee = 2.0
-    weight_rate = 0.8
-    distance_rate = 0.05
-
-    cost = round(base_fee + (weight_rate * total_weight) + (distance_rate * distance), 2)
+    cost = shipping_fee_for(distance)
 
     log = (f"[calculate_shipping] '{state['item']}' x{state['quantity']} "
-           f"weight={total_weight}kg to {state['locality']} "
-           f"({distance}km) -> shipping=${cost}")
+           f"to {state['locality']} ({distance}km) -> shipping=Rs.{cost}")
     print(log)
     return {
         "shipping_cost": cost,
