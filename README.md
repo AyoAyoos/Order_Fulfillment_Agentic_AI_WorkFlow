@@ -2,7 +2,7 @@
 
 A **Multi-Node LangGraph** project that models a Maharashtrian food-delivery order from a shop based at **Loni Kalbhor (Pune)** — from checking stock, to calculating shipping, to either *confirming* or *declining* the order.
 
-Built with **LangChain + LangGraph**, with **Ollama (qwen2.5:3b)** generating bilingual (English + Marathi) customer messages.
+Built with **LangChain + LangGraph**, with **Ollama (qwen2.5:3b)** generating bilingual (English + Marathi) customer messages, and a polished **Rich terminal UI** (banner, live node-by-node trace, billing tables, receipts).
 
 ---
 
@@ -12,19 +12,19 @@ Built with **LangChain + LangGraph**, with **Ollama (qwen2.5:3b)** generating bi
           (user input: one or more dishes + quantities, locality)
                     |
                     v
-take_order --> check_inventory --> (every dish in stock?) --+--yes--> calculate_shipping --> confirm_order --> END
-                                                              |
-                                                              +--no---> decline_order --> END
+run_order_session (tui) -> check_inventory --> (every dish in stock?) --+--yes--> calculate_shipping --> confirm_order --> END
+                                                                        |
+                                                                        +--no---> decline_order --> END
 ```
 
 | Node | What it does |
 |------|--------------|
-| `take_order` | (outside the graph) Collects the user's dishes, quantities & locality |
 | `check_inventory` | Checks every dish; sets `inventory_ok` = all have enough stock |
 | `calculate_shipping` | Adds one flat delivery fee in ₹ (only on success path) |
-| `confirm_order` | Finalizes the order + prints the billing total (success path) |
+| `confirm_order` | Finalizes the order (success path) |
 | `decline_order` | Turns the whole order down (some dish short, no shipping) |
 | `route_after_inventory` | **Conditional edge** — decides which way the graph goes |
+| `run_order_session` (tui) | (outside the graph) Collects input, streams execution, renders results |
 
 ---
 
@@ -40,19 +40,25 @@ take_order --> check_inventory --> (every dish in stock?) --+--yes--> calculate_
 - **All-or-nothing inventory** — if even one dish in a multi-item order is short, the whole order declines.
 - **Billing summary** — per-line items, combined subtotal, one shipping fee, and the **TOTAL** amount to pay.
 - **LLM messages** — `qwen2.5:3b` writes the final confirmation/decline line in a friendly Marathi tone (with automatic fallback if Ollama isn't running).
-- **Traced execution** — the `NODES RUN` line shows the exact path the graph took (success vs. decline).
+- **Traced execution** — a live Rich table flips each node from `pending` → `done` as it runs (driven by real `app.stream()`), and a final `Nodes run:` line shows the exact path (success vs. decline).
 
 ---
 
 ## Project Structure
 
+The code is split into **three clean layers** — logic, UI, and a thin entry point:
+
 ```
 Order_Fulfillment/
-├── order_fulfillment_graph.py   # the main script (the whole project)
-├── annotated_traces.txt         # output of both paths + jury explanations
-├── requirements.txt             # Python dependencies
-└── venv/                        # local virtual environment
+├── order_graph.py    # PURE logic: state schema, LangGraph nodes, edges, billing (no printing)
+├── tui.py            # ALL Rich rendering: banner, tables, prompts, live trace, receipt
+├── main.py           # thin entry point: builds the graph, drives the TUI loop
+├── annotated_traces.txt   # captured output of both paths + jury explanations
+├── requirements.txt       # Python dependencies
+└── venv/                  # local virtual environment
 ```
+
+**Why split it?** The LangGraph nodes in `order_graph.py` only *return data* (they never print). Every piece of on-screen output lives in `tui.py`. This means you could swap the terminal UI for a web/Streamlit UI **without touching the graph logic** — the graph is just a pure state machine.
 
 ---
 
@@ -72,6 +78,8 @@ langgraph
 langchain
 langchain-ollama
 langchain-core
+rich
+pyfiglet
 ```
 
 ### 2. (Optional) Set up Ollama for LLM messages
@@ -88,7 +96,7 @@ If Ollama isn't running, the script automatically uses pre-written fallback mess
 ### 3. Run
 
 ```bash
-python order_fulfillment_graph.py
+python main.py
 ```
 
 The script shows the full menu and delivery area, then asks you interactively:
@@ -185,9 +193,32 @@ Shipping cost is only meaningful for an order we can actually fulfil. Shipping i
 
 ---
 
+## Terminal UI (Rich)
+
+The interface is a **Rich terminal UI** (`tui.py`) that makes the LangGraph execution visible and impressive:
+
+- **ASCII banner** — `pyfiglet` renders "Khanaval" in a styled panel at startup.
+- **Menu & delivery tables** — colored Rich tables for the menu (with live stock, red when 0) and the delivery area (with the shipping fee per locality).
+- **Styled prompts** — Rich `Prompt`/`IntPrompt` for dishes, quantities, and locality, with re-prompt-on-error validation.
+- **Live execution trace** — a table that flips each node from `… pending` → `✓ done` as it finishes. This is **driven by `app.stream(...)`**, so the animation reflects the graph's *actual* node execution — not a fake sleep loop. Ask "is that animation real?" and the answer is yes.
+- **Per-node result panels** — the inventory check draws a per-dish ✓/✗ table; shipping and the final result are boxed panels, colored green on success / red on failure.
+- **Billing table** — DISH / QTY / PRICE / SUB with `Subtotal`, `Shipping`, and a bold `TOTAL`.
+- **Final receipt** — green `✓ CONFIRMED` or red `✗ DECLINED` with the LLM-generated bilingual message.
+
+**The honest live trace** — `main.py` uses LangGraph's streaming:
+
+```python
+for step in app.stream(initial_state, stream_mode="values"):
+    # step is the full accumulated state; render its last trace event
+```
+
+Because the YAML stream is real, a declined order only ever lights up `check_inventory → decline_order` (calculate_shipping/confirm_order stay pending) — exactly matching the logic.
+
+---
+
 ## Customizing
 
-- **Add a dish** — add it to `INVENTORY_DB` (stock) **and** `MENU_PRICE` (₹ per serving).
-- **Add a delivery locality** — add it to `DELIVERY_KM` with its road distance from Loni Kalbhor.
-- **Change shipping fees** — edit the `shipping_fee_for()` function (values must stay cheap, ~₹30–40).
-- **Change what's shown** — edit `show_menu()`, `show_delivery_area()`, or the billing block inside `take_order()`.
+- **Add a dish** — add it to `INVENTORY_DB` (stock) **and** `MENU_PRICE` (₹ per serving) in `order_graph.py`.
+- **Add a delivery locality** — add it to `DELIVERY_KM` in `order_graph.py` with its road distance from Loni Kalbhor.
+- **Change shipping fees** — edit the `shipping_fee_for()` function in `order_graph.py` (values must stay cheap, ~₹30–40).
+- **Change colors/layout/panels** — edit `tui.py` (banner in `show_banner()`, tables in `show_menu()`/`show_delivery_area()`, receipt in `render_node_panels()`/`render_billing()`).
