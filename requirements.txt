@@ -2,3 +2,5 @@ langgraph
 langchain
 langchain-ollama
 langchain-core
+rich
+pyfiglet
