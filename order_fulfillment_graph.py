@@ -69,7 +69,6 @@ class OrderState(TypedDict):
     item: str
     quantity: int
     locality: str                    # customer's delivery location
-    distance_km: Optional[float]
 
     inventory_ok: Optional[bool]
     available_stock: Optional[int]
@@ -133,7 +132,7 @@ def calculate_shipping(state: OrderState) -> dict:
     """
     item_weight = ITEM_WEIGHT_KG.get(state["item"], 1.0)
     total_weight = item_weight * state["quantity"]
-    distance = state.get("distance_km", 0.0)
+    distance = DELIVERY_KM.get(state["locality"], 0.0)
 
     base_fee = 2.0
     weight_rate = 0.8
@@ -142,7 +141,8 @@ def calculate_shipping(state: OrderState) -> dict:
     cost = round(base_fee + (weight_rate * total_weight) + (distance_rate * distance), 2)
 
     log = (f"[calculate_shipping] '{state['item']}' x{state['quantity']} "
-           f"weight={total_weight}kg distance={distance}km -> shipping=${cost}")
+           f"weight={total_weight}kg to {state['locality']} "
+           f"({distance}km) -> shipping=${cost}")
     print(log)
     return {
         "shipping_cost": cost,
