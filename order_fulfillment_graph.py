@@ -2,12 +2,12 @@
 Maharashtrian Order Fulfillment Workflow — Multi-Node LangGraph Project
 =======================================================================
 
-A hungry customer wants to order some quantity of a Maharashtrian dish,
-delivered near Pune. The workflow:
+A hungry customer wants to order one or more Maharashtrian dishes (each with
+its own quantity), delivered near Pune. The workflow:
 
-    check_inventory --> (enough stock?) --+--yes--> calculate_shipping --> confirm_order --> END
-                                           |
-                                           +--no---> decline_order --> END
+    check_inventory --> (enough stock for ALL items?) --+--yes--> calculate_shipping --> confirm_order --> END
+                                                        |
+                                                        +--no---> decline_order --> END
 
 We use LangGraph to wire these steps as a graph instead of a plain
 if/else script, because:
@@ -80,12 +80,12 @@ DELIVERY_KM = {
 
 
 class OrderState(TypedDict):
-    item: str
-    quantity: int
+    items: list                      # list of {"dish": str, "quantity": int}
     locality: str                    # customer's delivery location
 
-    inventory_ok: Optional[bool]
-    available_stock: Optional[int]
+    inventory_ok: Optional[bool]     # ALL items must have enough stock
+    available_stock: Optional[int]   # stock of the failed item (decline case)
+    failed_item: Optional[str]       # first dish that ran short (decline case)
     shipping_cost: Optional[float]
     order_status: Optional[str]
     final_message: Optional[str]
@@ -93,23 +93,38 @@ class OrderState(TypedDict):
 
 
 def check_inventory(state: OrderState) -> dict:
-    """Node 1: look up stock for the dish and decide if we have enough.
+    """Node 1: check stock for EVERY dish in the order.
 
     THE CONDITION (the heart of the whole project):
-        inventory_ok = (stock >= quantity)
+        inventory_ok = (stock >= quantity) for ALL items
+
+    If ANY dish is short, the whole order becomes invalid and we record
+    which item failed (failed_item) and how many of it remains in stock
+    (available_stock) so the decline message can explain why.
     """
-    item = state["item"]
-    quantity = state["quantity"]
-    stock = INVENTORY_DB.get(item, 0)
-    ok = stock >= quantity
+    all_ok = True
+    failed_item = None
+    failed_stock = None
+    pieces = []
+    for it in state["items"]:
+        dish = it["dish"]
+        qty = it["quantity"]
+        stock = INVENTORY_DB.get(dish, 0)
+        ok = stock >= qty
+        pieces.append(f"{qty}x {dish}(stock={stock})")
+        print(f"[check_inventory]  {qty}x {dish}(stock={stock}) -> "
+              f"{'OK' if ok else 'INSUFFICIENT'}")
+        if not ok and failed_item is None:
+            all_ok = False
+            failed_item = dish
+            failed_stock = stock
 
-    log = (f"[check_inventory] dish='{item}' requested={quantity} "
-           f"in_stock={stock} -> {'OK' if ok else 'INSUFFICIENT'}")
-    print(log)
-
+    log = (f"[check_inventory] {', '.join(pieces)} -> "
+           f"{'OK' if all_ok else 'INSUFFICIENT'}")
     return {
-        "inventory_ok": ok,
-        "available_stock": stock,
+        "inventory_ok": all_ok,
+        "failed_item": failed_item,
+        "available_stock": failed_stock if not all_ok else None,
         "trace": state["trace"] + [log],
     }
 
@@ -142,12 +157,14 @@ def route_after_inventory(state: OrderState) -> str:
 def calculate_shipping(state: OrderState) -> dict:
     """
     Node 2: only reached when inventory is sufficient.
-    A single flat delivery fee in rupees (Rs.30-40) based on distance.
+    ONE flat delivery fee in rupees (Rs.30-40) based on distance,
+    independent of how many items are in the order.
     """
     distance = DELIVERY_KM.get(state["locality"], 0.0)
     cost = shipping_fee_for(distance)
 
-    log = (f"[calculate_shipping] '{state['item']}' x{state['quantity']} "
+    n_items = sum(it["quantity"] for it in state["items"])
+    log = (f"[calculate_shipping] {len(state['items'])} item(s) "
            f"to {state['locality']} ({distance}km) -> shipping=Rs.{cost}")
     print(log)
     return {
@@ -156,18 +173,22 @@ def calculate_shipping(state: OrderState) -> dict:
     }
 
 
+def _describe_items(state: OrderState) -> str:
+    return ", ".join(f"{it['quantity']}x {it['dish']}" for it in state["items"])
+
+
 def confirm_order(state: OrderState) -> dict:
     prompt = (
         f"Write a SHORT order-confirmation message for a Maharashtrian food "
         f"delivery. Write ONLY in Latin/English letters (a-z) - do NOT use "
         f"Devanagari/Hindi script at all. Start with 'Namaskar!'. You MUST state "
         f"the exact shipping amount Rs.{state['shipping_cost']} (do not compute "
-        f"or change it). Mention ordering {state['quantity']} x {state['item']} "
+        f"or change it). Mention ordering {_describe_items(state)} "
         f"and delivery to {state['locality']}. End with 'Dhanyavaad!'. Keep it "
         f"ONE short sentence."
     )
     message = _generate_message(prompt, fallback=(
-        f"Namaskar! Your order of {state['quantity']} x {state['item']} "
+        f"Namaskar! Your order of {_describe_items(state)} "
         f"to {state['locality']} is confirmed. Shipping Rs.{state['shipping_cost']}. "
         f"Dhanyavaad!"
     ))
@@ -185,14 +206,15 @@ def decline_order(state: OrderState) -> dict:
         f"Write a SHORT polite order-decline message for a Maharashtrian food "
         f"delivery service. Write ONLY in Latin/English letters (a-z) - do NOT "
         f"use Devanagari/Hindi script at all. Start with 'Namaskar, sorry'. "
-        f"Mention we only have {state['available_stock']} x {state['item']} in "
-        f"stock so we can't fulfill {state['quantity']}. Suggest ordering "
+        f"Mention we only have {state['available_stock']} x "
+        f"{state['failed_item']} in stock so we can't fulfill the whole order "
+        f"of {_describe_items(state)}. Suggest ordering "
         f"something else. End with 'Dhanyavaad!'. Keep it ONE short sentence."
     )
     message = _generate_message(prompt, fallback=(
         f"Namaskar, sorry - we only have {state['available_stock']} x "
-        f"{state['item']} in stock, so we can't fulfill "
-        f"{state['quantity']}. Kyā tumhi āṇakhī kāhīy magal? Dhanyavaad!"
+        f"{state['failed_item']} in stock, so we can't fulfill "
+        f"{_describe_items(state)}. Kyā tumhi āṇakhī kāhīy magal? Dhanyavaad!"
     ))
     log = f"[decline_order] status=DECLINED message='{message}'"
     print(log)
@@ -328,15 +350,42 @@ def get_positive_int(prompt):
             print("  That isn't a number. Please try again.")
 
 
+def get_validated_dishes():
+    """Let the user order one or more dishes, each with its own quantity.
+
+    Dishes are typed comma-separated (e.g. 'vada_pav, misal_pav, modak').
+    Invalid names are re-prompted; duplicates are dropped.
+    Returns a list of {"dish": str, "quantity": int}.
+    """
+    print("\nYou can order several dishes. Type dish names separated by commas, e.g.:")
+    print("  vada_pav, misal_pav, modak")
+    while True:
+        raw = input("Choose dishes (comma-separated): ").strip().lower()
+        names = [n.strip() for n in raw.split(",") if n.strip()]
+        names = list(dict.fromkeys(names))  # drop duplicates, keep order
+        unknown = [n for n in names if n not in MENU_PRICE]
+        if not names:
+            print("  Please enter at least one dish.")
+            continue
+        if unknown:
+            print(f"  Unknown dish(es): {', '.join(unknown)}. "
+                  f"Choose from: {', '.join(MENU_PRICE)}")
+            continue
+        break
+
+    items = []
+    for name in names:
+        qty = get_positive_int(f"  How many servings of {name}? ")
+        items.append({"dish": name, "quantity": qty})
+    return items
+
+
 def take_order(app):
     """One full interactive ordering session."""
     show_menu()
     show_delivery_area()
 
-    dish = get_validated_input(
-        "\nWhat dish would you like? ", set(MENU_PRICE), "dish"
-    )
-    quantity = get_positive_int(f"  How many servings of {dish}? ")
+    items = get_validated_dishes()
     locality = get_validated_input(
         "Deliver to (locality): ", set(map(str.lower, DELIVERY_KM)), "locality"
     )
@@ -347,11 +396,11 @@ def take_order(app):
     print("=" * 60)
 
     initial_state: OrderState = {
-        "item": dish,
-        "quantity": quantity,
+        "items": items,
         "locality": locality,
         "inventory_ok": None,
         "available_stock": None,
+        "failed_item": None,
         "shipping_cost": None,
         "order_status": None,
         "final_message": None,
@@ -372,6 +421,29 @@ if __name__ == "__main__":
 
         print("\n" + "=" * 60)
         print("BILLING / SUMMARY")
+        print("=" * 60)
+        if result["order_status"] == "confirmed":
+            print(f"{'DISH':<18}{'QTY':>5}{'PRICE':>8}{'SUB':>10}")
+            print("-" * 60)
+            subtotal = 0
+            for it in result["items"]:
+                price = MENU_PRICE[it["dish"]]
+                sub = price * it["quantity"]
+                subtotal += sub
+                print(f"{it['dish']:<18}{it['quantity']:>5}Rs.{price:<5}"
+                      f"Rs.{sub:>5}")
+            print("-" * 60)
+            print(f"{'Subtotal':<31}{'Rs.' + str(subtotal):>15}")
+            print(f"Shipping   : Rs.{result['shipping_cost']:.1f}  "
+                  f"(to {result['locality']}, "
+                  f"{DELIVERY_KM.get(result['locality'], 0.0)} km)")
+            total = round(subtotal + result["shipping_cost"], 2)
+            print("-" * 60)
+            print(f"{'TOTAL':<31}{'Rs.' + str(total):>15}")
+        else:
+            print(f"ORDER DECLINED - {result['failed_item']} has only "
+                  f"{result['available_stock']} in stock.")
+            print("No billing was produced and NO shipping was charged.")
         print("=" * 60)
         print(f"FINAL STATUS : {result['order_status'].upper()}")
         print(f"FINAL MESSAGE: {result['final_message']}")
