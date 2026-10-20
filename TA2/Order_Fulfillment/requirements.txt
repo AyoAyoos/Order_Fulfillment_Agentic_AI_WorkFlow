@@ -1,0 +1,9 @@
+langgraph
+langchain
+langchain-ollama
+langchain-core
+langchain-community
+sentence-transformers
+chromadb
+rich
+pyfiglet
