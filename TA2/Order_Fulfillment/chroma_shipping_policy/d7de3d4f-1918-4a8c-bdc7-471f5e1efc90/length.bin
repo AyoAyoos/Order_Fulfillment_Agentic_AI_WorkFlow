@@ -1,0 +1,3 @@
+invalid type: string "When an order is confirmed, the system invites bids from active couriers.\nEach courier has a base fee and per-km rate. The courier must cover the delivery distance.\nThe cheapest eligible bid wins. If no courier covers the distance, the order cannot be shipped.", expected f64    overwrite_qruv : bool, optional
+
+        If True, consume Q, R, u, and v, if possible, while perf
